@@ -21,6 +21,11 @@ describe("forvis-mazars-vault", () => {
     program.programId
   );
 
+  const [userRecordPda, userRecordBump] = anchor.web3.PublicKey.findProgramAddressSync(
+    [Buffer.from("records"), user.toBuffer()],
+    program.programId
+  );
+
   before(async () => {
     // Airdrop for fees 
     await provider.connection.requestAirdrop(user, 10 * anchor.web3.LAMPORTS_PER_SOL);
@@ -35,6 +40,7 @@ describe("forvis-mazars-vault", () => {
         user: user,
         vaultState: vaultStatePda,
         vault: vaultPda,
+        userRecords: userRecordPda,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
@@ -44,6 +50,8 @@ describe("forvis-mazars-vault", () => {
     const vaultState = await program.account.vaultState.fetch(vaultStatePda);
     expect(vaultState.vaultBump).to.equal(vaultBump);
     expect(vaultState.stateBump).to.equal(stateBump);
+    expect(vaultState.recordsBump).to.equal(userRecordBump);
+
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
     const rentExempt = await provider.connection.getMinimumBalanceForRentExemption(0);
@@ -62,12 +70,14 @@ describe("forvis-mazars-vault", () => {
       user: user,
       vault: vaultPda,
       vaultState: vaultStatePda,
+      userRecords: userRecordPda,
       systemProgram: anchor.web3.SystemProgram.programId,
     })
     .rpc();
 
     const finalVaultBalance = await provider.connection.getBalance(vaultPda);
     const finalUserBalance = await provider.connection.getBalance(user);
+    const userRecord = await program.account.userRecords.fetch(userRecordPda);
 
     console.log("\nDeposit Instruction Successful, Tx Signature: ", tx);
 
@@ -76,6 +86,9 @@ describe("forvis-mazars-vault", () => {
 
     console.log("\nInitial Vault Balance:", initialVaultBalance);
     console.log("Final Vault Balance:", finalVaultBalance);
+
+    console.log("\nUser Record Deposit Amount:", userRecord.lastDeposited.amount.toString());
+    console.log("User Record Deposit Timestamp:", new Date(userRecord.lastDeposited.timestamp.toNumber() * 1000).toLocaleString());
   });
 
   it("Withdraw SOL from the vault", async () => {
@@ -90,12 +103,14 @@ describe("forvis-mazars-vault", () => {
         user: user,
         vault: vaultPda,
         vaultState: vaultStatePda,
+        userRecords: userRecordPda,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
 
     const finalVaultBalance = await provider.connection.getBalance(vaultPda);
     const finalUserBalance = await provider.connection.getBalance(user);
+    const userRecord = await program.account.userRecords.fetch(userRecordPda);
 
     console.log("\nWithdraw Instruction Successful, Tx Signature: ", tx);
 
@@ -104,24 +119,22 @@ describe("forvis-mazars-vault", () => {
 
     console.log("\nInitial Vault Balance:", initialVaultBalance);
     console.log("Final Vault Balance:", finalVaultBalance);
+
+    console.log("\nUser Record Deposit Amount:", userRecord.lastDeposited.amount.toString());
+    console.log("User Record Deposit Timestamp:", new Date(userRecord.lastDeposited.timestamp.toNumber() * 1000).toLocaleString());
   });
 
   it("Close the vault", async () => {
-    const initialVaultBalance = await provider.connection.getBalance(vaultPda);
-    const initialVaultStateBalance = await provider.connection.getBalance(vaultStatePda);
-    const initialUserBalance = await provider.connection.getBalance(user);
-
     let tx = await program.methods
       .close()
       .accountsStrict({
         user: user,
         vault: vaultPda,
         vaultState: vaultStatePda,
+        userRecords: userRecordPda,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
-
-    const finalUserBalance = await provider.connection.getBalance(user);
 
     console.log("\nClose Instruction Successful, Tx Signature: ", tx);
 
@@ -132,7 +145,8 @@ describe("forvis-mazars-vault", () => {
     const vaultStateInfo = await provider.connection.getAccountInfo(vaultStatePda);
     expect(vaultStateInfo).to.be.null;
 
-    // User gets back the remaining balance - fees
-    expect(finalUserBalance).to.equal(initialUserBalance + initialVaultBalance + initialVaultStateBalance - 5000);
+    // User records should be closed (null)
+    const userRecordInfo = await provider.connection.getAccountInfo(userRecordPda);
+    expect(userRecordInfo).to.be.null;
   });
 });

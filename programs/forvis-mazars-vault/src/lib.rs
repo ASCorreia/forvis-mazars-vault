@@ -1,7 +1,7 @@
 use anchor_lang::{
     prelude::*, 
     system_program::{
-        transfer, Transfer
+        Transfer, transfer
     }
 };
 
@@ -46,6 +46,14 @@ pub struct Initialize<'info> {
         bump,
     )]
     pub vault: SystemAccount<'info>,
+    #[account(
+        init,
+        payer = user,
+        seeds = [b"records", user.key().as_ref()],
+        bump,
+        space = UserRecords::DISCRIMINATOR.len() + UserRecords::INIT_SPACE,
+    )]
+    pub user_records: Account<'info, UserRecords>,
     pub system_program: Program<'info, System>,
 }
 
@@ -67,6 +75,18 @@ impl<'info> Initialize<'info> {
 
         self.vault_state.vault_bump = bumps.vault;
         self.vault_state.state_bump = bumps.vault_state;
+        self.vault_state.records_bump = bumps.user_records;
+
+        self.user_records.set_inner(UserRecords {
+            last_deposited: Record {
+                amount: 0,
+                timestamp: 0,
+            },
+            last_withdrawn: Record {
+                amount: 0,
+                timestamp: 0,
+            },
+        });
 
         Ok(())
     }  
@@ -87,6 +107,12 @@ pub struct Deposit<'info> {
         bump = vault_state.state_bump,
     )]
     pub vault_state: Account<'info, VaultState>,
+    #[account(
+        mut,
+        seeds = [b"records", user.key().as_ref()],
+        bump = vault_state.records_bump,
+    )]
+    pub user_records: Account<'info, UserRecords>,
     pub system_program: Program<'info, System>,
 }
 
@@ -103,6 +129,11 @@ impl<'info> Deposit<'info> {
         let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
 
         transfer(cpi_ctx, amount)?;
+
+        self.user_records.last_deposited = Record {
+            amount,
+            timestamp: Clock::get()?.unix_timestamp,
+        };
 
         Ok(())
     }
@@ -123,6 +154,12 @@ pub struct Withdraw<'info> {
         bump = vault_state.state_bump,
     )]
     pub vault_state: Account<'info, VaultState>,
+    #[account(
+        mut,
+        seeds = [b"records", user.key().as_ref()],
+        bump = vault_state.records_bump,
+    )]
+    pub user_records: Account<'info, UserRecords>,
     pub system_program: Program<'info, System>,
 }
 
@@ -149,6 +186,11 @@ impl<'info> Withdraw<'info> {
 
         transfer(cpi_ctx, amount)?;
 
+        self.user_records.last_withdrawn = Record {
+            amount,
+            timestamp: Clock::get()?.unix_timestamp,
+        };
+
         Ok(())
     }
 }
@@ -170,6 +212,13 @@ pub struct Close<'info> {
         close = user,
     )]
     pub vault_state: Account<'info, VaultState>,
+    #[account(
+        mut,
+        seeds = [b"records", user.key().as_ref()],
+        bump = vault_state.records_bump,
+        close = user,
+    )]
+    pub user_records: Account<'info, UserRecords>,
     pub system_program: Program<'info, System>,
 }
 
@@ -201,4 +250,18 @@ impl<'info> Close<'info> {
 pub struct VaultState {
     pub vault_bump: u8,
     pub state_bump: u8,
+    pub records_bump: u8,
+}
+
+#[derive(InitSpace)]
+#[account]
+pub struct UserRecords {
+    pub last_deposited: Record,
+    pub last_withdrawn: Record,
+}
+
+#[derive(AnchorDeserialize, AnchorSerialize, Clone, Copy, InitSpace)]
+pub struct Record {
+    pub amount: u64,
+    pub timestamp: i64,
 }
